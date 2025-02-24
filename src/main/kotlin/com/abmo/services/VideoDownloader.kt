@@ -305,7 +305,7 @@ class VideoDownloader: KoinComponent {
 //        println("\n")
         Logger.debug("[$index] Starting HTTP POST request to $url with body length: ${body.length}. Body (truncated): \"...${body.takeLast(30)}")
         val response = Unirest.post(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0")
             .header("Content-Type", "application/json")
             .headers(abyssDefaultHeaders)
             .body("""{"hash":$body}""")
