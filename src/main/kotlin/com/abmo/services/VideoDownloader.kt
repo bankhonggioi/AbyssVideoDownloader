@@ -3,11 +3,9 @@ package com.abmo.services
 import com.abmo.common.Constants.abyssDefaultHeaders
 import com.abmo.common.Logger
 import com.abmo.crypto.CryptoHelper
+import com.abmo.executor.JavaScriptExecutor
 import com.abmo.model.*
-import com.abmo.util.displayProgressBar
-import com.abmo.util.toJson
-import com.abmo.util.toObject
-import com.abmo.util.toReadableTime
+import com.abmo.util.*
 import com.mashape.unirest.http.Unirest
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
@@ -15,6 +13,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import org.jsoup.Jsoup
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.File
@@ -24,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 class VideoDownloader: KoinComponent {
 
     private val cryptoHelper: CryptoHelper by inject()
+    private val javaScriptExecutor: JavaScriptExecutor by inject()
 
     /**
      * Downloads video segments in parallel, decrypts the header of each segment, and merges them into a single MP4 file.
@@ -190,20 +190,36 @@ class VideoDownloader: KoinComponent {
 
 
     private fun extractEncryptedVideoMetaData(html: String): String? {
-        Logger.debug("Starting extraction of encrypted video metadata from HTML content.")
-        val regex = """JSON\.parse\(atob\("([^"]+)"\)\)""".toRegex()
-        val matchResult = regex.find(html)
+       val jsCode = Jsoup.parse(html)
+           .select("script")
+           .find { it.html().contains("subtitle") }
+           ?.html()
 
-        val result = matchResult?.groups?.get(1)?.value
-
-        if (matchResult != null) {
-            Logger.debug("Encrypted video metadata extracted successfully.")
-            Logger.debug("Encrypted metadata (truncated): ${result?.take(100)}...")
-        } else {
+        if (jsCode == null) {
             Logger.debug("No encrypted video metadata found in the provided HTML.", true)
+            return null
         }
 
-        return matchResult?.groups?.get(1)?.value
+        val functionsRegex = """'\b([A-Za-z0-9]{4,5})\b'\s*:\s*(function\s*\([^)]*\)\s*\{[^}]*}|[^,]+)""".toRegex(RegexOption.DOT_MATCHES_ALL)
+        val matches = functionsRegex.findAll(jsCode)
+        val parts = matches.filterNot { it.value.contains("function") }
+            .maxBy { it.value.length }.groupValues[2]
+
+        val oldVariableName = parts.substringBefore("(")
+        val assignmentRegex = """var\s+$oldVariableName\s*=\s*(_0x[a-fA-F0-9]+)""".toRegex()
+        val newVariableName = assignmentRegex.find(jsCode)?.groupValues?.get(1) ?: return null
+
+
+        val encryptedMetaDataParts = "java.lang.System.out.println(${parts.replace(oldVariableName, newVariableName)})"
+        val windowStartIndex = jsCode.indexOf("window[")
+
+        val windowLastIndex = jsCode.lastIndexOf(");")
+        val stringToReplace = jsCode.substring(windowStartIndex, windowLastIndex)
+        val javascriptCodeToExecute = jsCode.replace(stringToReplace, encryptedMetaDataParts)
+            .replaceLast("})", "")
+        return javaScriptExecutor.runJavaScriptCode(
+            javascriptCode = javascriptCodeToExecute
+        )
     }
 
     // temporary solution
